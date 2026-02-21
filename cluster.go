@@ -70,10 +70,6 @@ func limaYAML(m Machine) string {
 		netBlock = "networks:\n  - lima: user-v2"
 	}
 	arch, imageURL := limaGuestArch()
-	mountType := "virtiofs"
-	if runtime.GOOS == "linux" {
-		mountType = "9p" // no virtiofsd required; works with QEMU on standard Linux
-	}
 	return fmt.Sprintf(`vmType: %s
 os: Linux
 arch: %s
@@ -83,10 +79,7 @@ images:
 cpus: 2
 memory: 2GiB
 disk: 20GiB
-mountType: %s
-mounts:
-  - location: "~"
-    writable: true
+mounts: []
 %s
 provision:
   - mode: system
@@ -96,10 +89,8 @@ provision:
       hostnamectl set-hostname %s
       sed -i "s/^127.0.1.1.*/127.0.1.1\t%s %s/" /etc/hosts || true
       sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-      mkdir -p /root/.ssh
-      cp /home/*.pub /root/.ssh/authorized_keys 2>/dev/null || true
       systemctl restart sshd
-`, vmType, arch, imageURL, arch, mountType, netBlock, m.Name, m.FQDN, m.Name)
+`, vmType, arch, imageURL, arch, netBlock, m.Name, m.FQDN, m.Name)
 }
 
 func (c *Cluster) CreateVMs() error {
