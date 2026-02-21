@@ -18,6 +18,13 @@ type Step struct {
 }
 
 func main() {
+	// ktew must run against the standard Lima installation.
+	// Users with Colima often have LIMA_HOME set to ~/.colima/_lima, which causes
+	// limactl to look for a Colima-managed networks.yaml that ktew cannot manage.
+	// We force the standard environment to ensure hermetic operation.
+	os.Unsetenv("LIMA_HOME")
+	os.Unsetenv("LIMA_INSTANCE")
+
 	upCmd := flag.NewFlagSet("up", flag.ExitOnError)
 	downCmd := flag.NewFlagSet("down", flag.ExitOnError)
 	workDir := ""
