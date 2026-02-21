@@ -1,0 +1,10 @@
+# Build output
+kthw
+ktew
+
+# Generated cluster artifacts (certs, keys, kubeconfigs, report — never commit)
+kthw-work/
+kthw-report.md
+
+# Local Lima install (users install Lima themselves via brew or release)
+.lima-install/
