@@ -65,10 +65,7 @@ func limaGuestArch() (arch, imageURL string) {
 
 func limaYAML(m Machine) string {
 	vmType := limaVMType()
-	netBlock := "networks:\n  - lima: shared"
-	if runtime.GOOS == "linux" {
-		netBlock = "networks:\n  - lima: user-v2"
-	}
+	netBlock := "networks:\n  - lima: user-v2"
 	arch, imageURL := limaGuestArch()
 	mountType := "virtiofs"
 	if runtime.GOOS == "linux" {
