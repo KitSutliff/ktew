@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ktew — Speedrun Leaderboard</title>
+  <meta name="description" content="Allows the user to learn absolutely nothing about kubernetes... very quickly. Speedrun leaderboard for Kubernetes The Easy Way.">
+  <meta property="og:title" content="ktew — Speedrun Leaderboard">
+  <meta property="og:description" content="Allows the user to learn absolutely nothing about kubernetes... very quickly.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Hero -->
+  <header class="hero">
+    <h1>ktew</h1>
+    <p class="subtitle">Kubernetes The Easy Way — Speedrun Leaderboard</p>
+    <p class="tagline">"Allows the user to learn absolutely nothing about kubernetes... very quickly."</p>
+  </header>
+
+  <!-- Nav -->
+  <nav class="nav">
+    <button class="nav-tab active" data-section="leaderboard">Leaderboard</button>
+    <button class="nav-tab" data-section="categories">Categories</button>
+    <button class="nav-tab" data-section="rules">Rules</button>
+    <button class="nav-tab" data-section="run">How to Run</button>
+    <button class="nav-tab" data-section="submit">Submit a Run</button>
+  </nav>
+
+  <!-- Leaderboard Section -->
+  <section id="leaderboard" class="section active">
+    <div class="category-tabs">
+      <button class="cat-tab active" data-category="standard">Standard Run</button>
+      <button class="cat-tab" data-category="glitchless">Glitchless</button>
+    </div>
+    <div class="platform-pills">
+      <button class="pill active" data-platform="all">All Platforms</button>
+      <button class="pill" data-platform="macOS Apple Silicon">macOS Apple Silicon</button>
+      <button class="pill" data-platform="macOS Intel">macOS Intel</button>
+      <button class="pill" data-platform="Linux ARM64">Linux ARM64</button>
+      <button class="pill" data-platform="Linux x86_64">Linux x86_64</button>
+    </div>
+    <div class="table-wrap">
+      <table id="leaderboard-table">
+        <thead>
+          <tr>
+            <th class="col-rank">#</th>
+            <th class="col-runner">Runner</th>
+            <th class="col-time sortable active-sort" data-sort="time">Time</th>
+            <th class="col-platform">Platform</th>
+            <th class="col-date sortable" data-sort="date">Date</th>
+            <th class="col-proof">Proof</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body">
+        </tbody>
+      </table>
+      <p id="no-runs" class="empty-state" hidden>No runs recorded yet for this category. Be the first.</p>
+    </div>
+  </section>
+
+  <!-- Categories Section -->
+  <section id="categories" class="section">
+    <h2>Categories</h2>
+
+    <div class="category-card highlight">
+      <h3>What ktew does</h3>
+      <p>ktew automates the entire <a href="https://github.com/kelseyhightower/kubernetes-the-hard-way" target="_blank" rel="noopener">Kubernetes The Hard Way</a> tutorial. Your machine is the jumpbox. It spins up 3 Lima VMs (1 control plane, 2 workers) — 4 machines total. It generates a CA and 8 TLS certificates, 6 kubeconfigs, an encryption config, downloads all binaries, bootstraps etcd, the control plane, the workers, configures pod networking, and runs a full smoke test.</p>
+      <p>Then it destroys everything. VMs gone. Work directory gone. The binary deletes itself. You are not left with a Kubernetes cluster. You are left with a time and a TAP report.</p>
+    </div>
+
+    <div class="category-card main-category">
+      <h3>Standard Run <span class="badge">Main Category</span></h3>
+      <p class="category-motto">"Hit Congratul8ions!"</p>
+      <ul>
+        <li>Your machine as jumpbox + 3 Lima VMs = 4 machines total.</li>
+        <li>Run <code>./kthw up</code>. Timer starts at Enter, stops at <code>Congratul8ions!</code></li>
+        <li><code>10/10 passed | 0 failed</code> — or it doesn't count.</li>
+        <li>Full cleanup must complete — nothing left but your time.</li>
+      </ul>
+
+      <h4>Setup (not timed)</h4>
+      <ul>
+        <li>Go 1.22+ installed</li>
+        <li>Lima may be pre-installed (ktew installs it automatically if missing, but that costs time)</li>
+        <li>Lima VM base images may be cached from a previous run</li>
+        <li>Build the binary: <code>go build -o kthw .</code></li>
+        <li>No pre-downloaded Kubernetes/etcd/containerd binaries — those download during the run</li>
+      </ul>
+
+      <h4>Platform Sub-Categories</h4>
+      <p>Each platform is a genuine performance variable — different virtualization backends, different architectures, different I/O characteristics. These aren't gimmicks; they're real splits.</p>
+      <div class="platform-grid">
+        <div class="platform-item">
+          <strong>macOS (Apple Silicon)</strong>
+          <span>ARM64 VMs via VZ framework</span>
+        </div>
+        <div class="platform-item">
+          <strong>macOS (Intel)</strong>
+          <span>x86_64 VMs via VZ framework</span>
+        </div>
+        <div class="platform-item">
+          <strong>Linux (ARM64)</strong>
+          <span>ARM64 VMs via QEMU</span>
+        </div>
+        <div class="platform-item">
+          <strong>Linux (x86_64)</strong>
+          <span>x86_64 VMs via QEMU</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="category-card">
+      <h3>Glitchless</h3>
+      <p>Same 4-machine layout. Same rules. But nothing is cached.</p>
+      <ul>
+        <li>No pre-installed Lima — ktew installs it from scratch</li>
+        <li>No cached VM base images — <code>limactl prune</code> before the run</li>
+        <li>No pre-downloaded binaries</li>
+        <li>Everything downloads fresh. Your internet connection is now part of your time.</li>
+        <li>Full cleanup must complete — nothing left when it's done.</li>
+      </ul>
+      <p class="muted">This is the "real experience" category. It measures what a first-time user actually sees.</p>
+    </div>
+
+    <div class="category-card">
+      <h3>What the smoke test verifies</h3>
+      <p>Step 10 runs a full verification suite before cleanup:</p>
+      <ul>
+        <li>Secrets are encrypted at rest in etcd (AES-CBC)</li>
+        <li>Deployments work (nginx creates and scales)</li>
+        <li>NodePort services are reachable</li>
+        <li><code>kubectl exec</code> works inside pods</li>
+        <li>All TLS certificates are valid and components authenticate via mTLS</li>
+      </ul>
+      <p class="muted">The cluster is real. It's a real Kubernetes cluster with real PKI, real etcd, real pod networking. It just doesn't exist anymore by the time you read this.</p>
+    </div>
+  </section>
+
+  <!-- Rules Section -->
+  <section id="rules" class="section">
+    <h2>Rules</h2>
+    <h3>Timing</h3>
+    <ol class="rules-list">
+      <li>Timer starts when you press Enter on <code>./kthw up</code></li>
+      <li>Timer stops when <code>Congratul8ions!</code> prints with <code>10/10 passed | 0 failed</code> and your time</li>
+      <li>The run must complete fully — VMs destroyed, work directory cleaned, binary self-deleted. You don't get a cluster. You get a time.</li>
+      <li>Build time (<code>go build</code>) is not included — only the run itself is timed</li>
+    </ol>
+
+    <h3>Standard Run setup</h3>
+    <ol class="rules-list">
+      <li>Go 1.22+ pre-installed</li>
+      <li>Lima may be pre-installed</li>
+      <li>Lima VM base images may be cached (default behavior after a previous run)</li>
+      <li>No pre-downloaded Kubernetes, etcd, containerd, or CNI binaries — those download during the timed run</li>
+    </ol>
+
+    <h3>Glitchless setup</h3>
+    <ol class="rules-list">
+      <li>Go 1.22+ pre-installed (only exception)</li>
+      <li>Lima must NOT be pre-installed — ktew installs it during the run</li>
+      <li>No cached VM images — run <code>limactl prune</code> if Lima was previously installed, or start from a clean system</li>
+      <li>No pre-downloaded binaries of any kind</li>
+      <li>Internet speed is part of your time</li>
+    </ol>
+
+    <h3>Proof &amp; disputes</h3>
+    <ol class="rules-list">
+      <li>Proof must include full terminal output showing all 10 TAP steps and the <code>Congratul8ions!</code> finish</li>
+      <li>Terminal recordings (<a href="https://asciinema.org" target="_blank" rel="noopener">asciinema</a>, screen capture) or full paste accepted</li>
+      <li>Cloud VMs as jumpbox are a separate platform category if demand emerges</li>
+      <li>All disputes settled by <a href="https://github.com/KitSutliff" target="_blank" rel="noopener">Kit</a></li>
+    </ol>
+  </section>
+
+  <!-- How to Run Section -->
+  <section id="run" class="section">
+    <h2>How to Run</h2>
+    <div class="code-block">
+      <pre><code># Fork first at github.com/KitSutliff/ktew, then:
+git clone https://github.com/YOUR_USERNAME/ktew.git
+cd ktew
+go build -o kthw .
+./kthw up</code></pre>
+    </div>
+    <p>Timer starts at Enter. Timer stops at <code>Congratul8ions!</code></p>
+    <p>You'll see TAP output for each of the 10 steps, then:</p>
+    <div class="code-block output">
+      <pre><code>  10/10 passed | 0 failed
+  ────────────────────────────────────────
+  Cleaning up VMs...
+  done.
+
+  time - 8m27s
+
+  Congratul8ions!
+
+  report: kthw-report.md</code></pre>
+    </div>
+    <div class="run-links">
+      <a href="https://github.com/KitSutliff/ktew" target="_blank" rel="noopener" class="link-btn">ktew Repository</a>
+    </div>
+  </section>
+
+  <!-- Submit Section -->
+  <section id="submit" class="section">
+    <h2>Submit a Run</h2>
+    <div class="submit-steps">
+      <div class="submit-step">
+        <span class="step-number">1</span>
+        <div>
+          <strong>Fork the repo</strong>
+          <p><a href="https://github.com/KitSutliff/ktew/fork" target="_blank" rel="noopener">Fork ktew on GitHub</a></p>
+        </div>
+      </div>
+      <div class="submit-step">
+        <span class="step-number">2</span>
+        <div>
+          <strong>Clone your fork and run it</strong>
+          <div class="code-block">
+            <pre><code>git clone https://github.com/YOUR_USERNAME/ktew.git
+cd ktew
+go build -o kthw .
+./kthw up</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="submit-step">
+        <span class="step-number">3</span>
+        <div>
+          <strong>Add your run to the leaderboard</strong>
+          <p>Edit <code>site/data/leaderboard.json</code> and add your entry:</p>
+          <div class="code-block">
+            <pre><code>{
+  "runner": "your-github-username",
+  "github": "https://github.com/your-github-username",
+  "time_seconds": 507,
+  "time_display": "8m27s",
+  "category": "standard",
+  "platform": "macOS Apple Silicon",
+  "date": "2026-02-23",
+  "proof": "link-to-your-tap-output-or-recording",
+  "notes": ""
+}</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="submit-step">
+        <span class="step-number">4</span>
+        <div>
+          <strong>Open a Pull Request</strong>
+          <p>Push to your fork and <a href="https://github.com/KitSutliff/ktew/compare" target="_blank" rel="noopener">open a PR</a> with your proof (TAP output or terminal recording).</p>
+        </div>
+      </div>
+    </div>
+    <div class="submit-info">
+      <h3>Proof requirements</h3>
+      <ul>
+        <li>Full TAP output showing <code>10/10 passed | 0 failed</code></li>
+        <li>The <code>Congratul8ions!</code> message with your time</li>
+        <li>Terminal recording (<a href="https://asciinema.org" target="_blank" rel="noopener">asciinema</a>) or screenshot accepted</li>
+        <li>Paste it in the PR description or link it</li>
+      </ul>
+      <p class="muted">Don't want to edit JSON? <a href="https://github.com/KitSutliff/ktew/issues/new?template=submit-run.yml" target="_blank" rel="noopener">Submit via GitHub Issue</a> instead.</p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p class="footer-tagline">A project by Kit Sutliff</p>
+    <div class="footer-links">
+      <a href="https://github.com/KitSutliff/ktew" target="_blank" rel="noopener">ktew</a>
+      <span class="sep">/</span>
+      <a href="terminal/index.html">Terminal: The Reload</a>
+      <span class="sep">/</span>
+      <a href="https://github.com/kelseyhightower/kubernetes-the-hard-way" target="_blank" rel="noopener">Kubernetes The Hard Way</a>
+      <span class="sep">/</span>
+      <a href="https://rosepinetheme.com" target="_blank" rel="noopener">Ros&eacute; Pine</a>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
