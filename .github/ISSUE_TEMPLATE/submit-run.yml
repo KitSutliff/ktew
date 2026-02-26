@@ -1,0 +1,62 @@
+name: Submit a Run
+description: Submit your ktew speedrun time to the leaderboard
+title: "[Run] "
+labels: ["speedrun-submission"]
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Standard Run
+        - Glitchless
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Linux ARM64
+        - Linux x86_64
+    validations:
+      required: true
+
+  - type: input
+    id: time
+    attributes:
+      label: Time
+      description: Your completion time as shown in the Congratul8ions output (e.g. 8m27s)
+      placeholder: "8m27s"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof
+    attributes:
+      label: Proof
+      description: Paste your full TAP output, or link to a terminal recording (asciinema, screen capture). Must show 10/10 passed and the Congratul8ions message.
+      placeholder: |
+        Paste TAP output here, or provide a link to your recording...
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware (optional)
+      description: CPU, RAM, disk type. Required for low% category if added later.
+      placeholder: "Apple M2 Pro, 16GB RAM, 512GB SSD"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes (optional)
+      description: Anything else about your run.
+    validations:
+      required: false

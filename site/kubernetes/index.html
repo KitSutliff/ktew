@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kubernetes: The Reload</title>
+  <meta name="description" content="This isn't a tutorial. It's a reload. An interactive kubectl game for people who used to know Kubernetes.">
+  <meta property="og:title" content="Kubernetes: The Reload">
+  <meta property="og:description" content="This isn't a tutorial. It's a reload.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ═══ Level Select Screen ═══ -->
+  <div id="level-select" class="screen active">
+    <div class="ls-hero">
+      <h1>kubernetes</h1>
+      <p class="subtitle">The Reload</p>
+      <p class="tagline">"This isn't a tutorial. You used to know this. Your clusters still remember."</p>
+    </div>
+    <div id="level-select-grid"></div>
+    <div class="ls-footer">
+      <button id="btn-reset-progress">Reset Progress</button>
+      <a href="../index.html">ktew Leaderboard</a>
+      <a href="../terminal/index.html">Terminal: The Reload</a>
+      <a href="https://github.com/KitSutliff/ktew" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+
+  <!-- ═══ Game Screen ═══ -->
+  <div id="game-screen" class="screen">
+
+    <!-- Sidebar with chibi + level info -->
+    <div class="game-sidebar">
+      <div class="game-chibi-wrap">
+        <img id="game-chibi" class="game-chibi" src="../terminal/chibi-move.png" alt="Lex">
+      </div>
+      <div id="game-level-name">Level 1: Look</div>
+      <div id="game-level-subtitle">Scout Lex</div>
+      <div id="challenge-counter">1/4</div>
+      <div class="sidebar-divider"></div>
+      <p class="sidebar-hint">Type <kbd>hint</kbd> for a nudge<br><kbd>hint</kbd> twice for the answer</p>
+      <button id="btn-back-to-levels" class="sidebar-btn">Back to Levels</button>
+    </div>
+
+    <!-- Terminal -->
+    <div class="game-terminal-wrap">
+      <div class="terminal-bar">
+        <div class="terminal-dots">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+        </div>
+        <span class="terminal-title">kit@cluster — kubectl</span>
+      </div>
+      <div id="terminal-output"><div id="terminal-output-inner"></div></div>
+      <div class="terminal-input-row">
+        <span class="terminal-prompt" id="terminal-prompt">kit@cluster:default$&nbsp;</span>
+        <input type="text" id="terminal-input" autofocus spellcheck="false" autocomplete="off">
+      </div>
+    </div>
+
+  </div>
+
+  <script src="cluster.js"></script>
+  <script src="commands.js"></script>
+  <script src="levels.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
