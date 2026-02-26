@@ -175,29 +175,30 @@ body {
 /* Sidebar */
 
 .game-sidebar {
-  width: 22rem;
-  min-width: 22rem;
+  width: 24rem;
+  min-width: 24rem;
   background: var(--surface);
   border-right: 1px solid var(--overlay);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1.5rem 1rem;
-  gap: 1rem;
+  padding: 1rem 0.75rem;
+  gap: 0.5rem;
 }
 
 .game-chibi-wrap {
   width: 100%;
-  display: flex;
-  justify-content: center;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 8px;
   position: relative;
 }
 
 .game-chibi {
   width: 100%;
-  max-width: 20rem;
-  height: auto;
-  object-fit: contain;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 35%;
   border-radius: 8px;
   transition: all 0.3s ease;
 }
@@ -232,24 +233,26 @@ body {
 
 #game-level-name {
   color: var(--iris);
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
   text-align: center;
+  margin-top: 0.15rem;
 }
 
 #game-level-subtitle {
   color: var(--muted);
   font-size: 0.75rem;
   text-align: center;
+  margin-top: -0.2rem;
 }
 
 #challenge-counter {
   background: var(--overlay);
   border: 1px solid var(--muted);
   color: var(--text);
-  padding: 0.3rem 0.8rem;
+  padding: 0.2rem 0.7rem;
   border-radius: 12px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -259,10 +262,18 @@ body {
   background: rgba(235, 111, 146, 0.1);
 }
 
+.sidebar-divider {
+  width: 60%;
+  height: 1px;
+  background: var(--overlay);
+  margin: 0.25rem 0;
+}
+
 .sidebar-hint {
   color: var(--muted);
   font-size: 0.72rem;
   text-align: center;
+  line-height: 1.45;
   margin-top: auto;
 }
 
@@ -280,13 +291,12 @@ body {
   background: transparent;
   border: 1px solid var(--overlay);
   color: var(--subtle);
-  padding: 0.35rem 0.9rem;
+  padding: 0.3rem 0.8rem;
   border-radius: 4px;
   font-family: inherit;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s ease;
-  margin-top: 0.5rem;
 }
 
 .sidebar-btn:hover {
@@ -337,12 +347,12 @@ body {
 #terminal-output {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
-  font-size: 0.85rem;
-  line-height: 1.5;
+  padding: 1.5rem 1.5rem 1rem;
+  font-size: 1rem;
+  line-height: 1.6;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 #terminal-output::-webkit-scrollbar {
@@ -361,7 +371,7 @@ body {
 .terminal-input-row {
   display: flex;
   align-items: center;
-  padding: 0.5rem 1rem;
+  padding: 0.6rem 1.5rem;
   background: var(--surface);
   border-top: 1px solid var(--overlay);
   gap: 0;
@@ -369,7 +379,7 @@ body {
 
 .terminal-prompt {
   color: var(--foam);
-  font-size: 0.85rem;
+  font-size: 1rem;
   white-space: nowrap;
   user-select: none;
 }
@@ -380,7 +390,7 @@ body {
   border: none;
   color: var(--text);
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 1rem;
   outline: none;
   padding: 0.25rem 0 0.25rem 0.35rem;
   caret-color: var(--iris);
@@ -390,6 +400,7 @@ body {
 
 #terminal-output-inner {
   max-width: 52rem;
+  margin-bottom: 0.5rem;
 }
 
 .term-line {
@@ -410,7 +421,7 @@ body {
 .term-line.header {
   color: var(--iris);
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.15rem;
 }
 
 .term-line.subtitle {
@@ -434,7 +445,7 @@ body {
 .term-line.boss-name {
   color: var(--love);
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.15rem;
 }
 
 .term-line.input-echo {
@@ -484,13 +495,13 @@ body {
   }
 
   .game-chibi-wrap {
-    width: auto;
+    width: 4rem;
+    min-width: 4rem;
+    aspect-ratio: 1;
   }
 
   .game-chibi {
-    width: 5rem;
-    max-width: 5rem;
-    height: auto;
+    object-position: center 30%;
   }
 
   .sidebar-hint {

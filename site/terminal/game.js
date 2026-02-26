@@ -534,7 +534,25 @@ COMMANDS.diff = (args, state) => {
 
 // Pipe support: handle simple | chains
 function parsePipeline(input) {
-  return input.split('|').map(s => s.trim()).filter(Boolean);
+  const segments = [];
+  let current = '';
+  let inQuote = null;
+  for (const ch of input) {
+    if (inQuote) {
+      current += ch;
+      if (ch === inQuote) inQuote = null;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      current += ch;
+    } else if (ch === '|') {
+      segments.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) segments.push(current.trim());
+  return segments.filter(Boolean);
 }
 
 function parseArgs(str) {
@@ -871,10 +889,17 @@ const LEVELS = [
     intro: "What's running, what's eating resources, and how to stop it.",
     challenges: [
       {
-        prompt: "Show all the files in /var/log with full details and human-readable sizes.",
-        hint: "ls -lh on /var/log.",
+        prompt: "Show all the files in /var/log with full details.",
+        hint: "ls with -l for long listing on /var/log.",
         answer: "ls -lh /var/log",
-        check: (input) => input.includes('ls') && input.includes('-l') && input.includes('-h') && input.includes('/var/log'),
+        check: (input) => {
+          const hasLs = input.includes('ls');
+          const hasLog = input.includes('/var/log');
+          const flags = input.match(/-\w+/g) || [];
+          const allFlags = flags.join('');
+          const hasL = allFlags.includes('l');
+          return hasLs && hasLog && hasL;
+        },
         successMsg: "File sizes you can actually read. Not everything needs to be in bytes."
       },
       {
@@ -939,8 +964,9 @@ const LEVELS = [
       hint: "grep -rli with -E for extended regex 'TODO|FIXME'.",
       answer: 'grep -rli -E "TODO|FIXME" /home/kit/projects',
       check: (input) => {
-        return input.includes('grep') && (input.includes('-r') || input.includes('-R')) &&
-          (input.includes('-l') || input.includes('-l')) &&
+        const flags = (input.match(/-\w+/g) || []).join('');
+        return input.includes('grep') && flags.includes('r') &&
+          flags.includes('l') &&
           (/TODO/i.test(input)) && (/FIXME/i.test(input));
       },
       successMsg: null
