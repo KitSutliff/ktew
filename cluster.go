@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,26 +16,32 @@ type Machine struct {
 	Name   string
 	FQDN   string
 	IP     string
-	Subnet string // pod CIDR, empty for server
+	Subnet string // pod CIDR, empty for server/jumpbox
 }
 
 // Cluster holds all state for a KTHW deployment.
+// The Jumpbox is the admin machine — all cluster operations flow through it.
 type Cluster struct {
-	WorkDir  string
-	Machines []Machine
-	Server   Machine
-	Nodes    []Machine
+	WorkDir    string
+	JumpboxDir string // working directory on the jumpbox VM (/root/kubernetes-the-hard-way)
+	Jumpbox    Machine
+	Server     Machine
+	Nodes      []Machine
+	Machines   []Machine // all 4 VMs
 }
 
 func NewCluster(workDir string) *Cluster {
+	jumpbox := Machine{Name: "jumpbox", FQDN: "jumpbox.kubernetes.local"}
 	server := Machine{Name: "server", FQDN: "server.kubernetes.local"}
 	node0 := Machine{Name: "node-0", FQDN: "node-0.kubernetes.local", Subnet: "10.200.0.0/24"}
 	node1 := Machine{Name: "node-1", FQDN: "node-1.kubernetes.local", Subnet: "10.200.1.0/24"}
 	return &Cluster{
-		WorkDir:  workDir,
-		Server:   server,
-		Nodes:    []Machine{node0, node1},
-		Machines: []Machine{server, node0, node1},
+		WorkDir:    workDir,
+		JumpboxDir: "/root/kubernetes-the-hard-way",
+		Jumpbox:    jumpbox,
+		Server:     server,
+		Nodes:      []Machine{node0, node1},
+		Machines:   []Machine{jumpbox, server, node0, node1},
 	}
 }
 
@@ -55,7 +62,6 @@ func limaVMType() string {
 	return "vz"
 }
 
-// limaGuestArch returns Lima's arch name and Ubuntu cloud image URL for the current host arch.
 func limaGuestArch() (arch, imageURL string) {
 	if runtime.GOARCH == "amd64" {
 		return "x86_64", "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
@@ -65,7 +71,10 @@ func limaGuestArch() (arch, imageURL string) {
 
 func limaYAML(m Machine) string {
 	vmType := limaVMType()
-	netBlock := "networks:\n  - lima: user-v2"
+	netBlock := "networks:\n  - lima: shared"
+	if runtime.GOOS == "linux" {
+		netBlock = "networks:\n  - lima: user-v2"
+	}
 	arch, imageURL := limaGuestArch()
 	return fmt.Sprintf(`vmType: %s
 os: Linux
@@ -93,27 +102,53 @@ provision:
 func (c *Cluster) CreateVMs() error {
 	cleanConflictingVMs(c.AllNames())
 
+	// Pre-cleanup: remove any leftover instances with these names
 	for _, m := range c.Machines {
-		// Nuke any stale Lima instance with the same name so re-runs just work.
 		if limaInstanceExists(m.Name) {
-			_ = run("limactl", "stop", "--force", m.Name)
-			_ = run("limactl", "delete", m.Name)
+			output("limactl", "stop", "--force", m.Name)
+			output("limactl", "delete", m.Name)
 		}
+	}
 
+	// Write all configs
+	for _, m := range c.Machines {
 		cfgPath := filepath.Join(c.WorkDir, m.Name+".yaml")
 		if err := os.WriteFile(cfgPath, []byte(limaYAML(m)), 0644); err != nil {
 			return fmt.Errorf("write lima config for %s: %w", m.Name, err)
 		}
-		createArgs := []string{"create", "--name=" + m.Name, "--tty=false", cfgPath}
-		if runtime.GOOS == "linux" && m.Name == "server" {
-			createArgs = append(createArgs, "--port-forward=6443:6443")
+	}
+
+	// Create and start all VMs in parallel
+	type vmResult struct {
+		name string
+		err  error
+	}
+	ch := make(chan vmResult, len(c.Machines))
+	for _, m := range c.Machines {
+		go func(m Machine) {
+			cfgPath := filepath.Join(c.WorkDir, m.Name+".yaml")
+			if out, err := output("limactl", "create", "--name="+m.Name, "--tty=false", cfgPath); err != nil {
+				ch <- vmResult{m.Name, fmt.Errorf("create %s: %w\n%s", m.Name, err, out)}
+				return
+			}
+			if out, err := output("limactl", "start", m.Name); err != nil {
+				ch <- vmResult{m.Name, fmt.Errorf("start %s: %w\n%s", m.Name, err, out)}
+				return
+			}
+			fmt.Printf("    ✓ %s\n", m.Name)
+			ch <- vmResult{m.Name, nil}
+		}(m)
+	}
+
+	var errs []string
+	for range c.Machines {
+		r := <-ch
+		if r.err != nil {
+			errs = append(errs, r.err.Error())
 		}
-		if err := run("limactl", createArgs...); err != nil {
-			return fmt.Errorf("create VM %s: %w", m.Name, err)
-		}
-		if err := run("limactl", "start", m.Name); err != nil {
-			return fmt.Errorf("start VM %s: %w", m.Name, err)
-		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("VM creation failed:\n%s", strings.Join(errs, "\n"))
 	}
 	return nil
 }
@@ -134,9 +169,6 @@ func (c *Cluster) DestroyVMs() error {
 	return nil
 }
 
-// cleanConflictingVMs detects and removes non-Lima VMs (e.g. libvirt) whose names
-// collide with the cluster we're about to create. Also catches "jumpbox" which the
-// original KTHW tutorial creates but ktew doesn't.
 func cleanConflictingVMs(clusterNames []string) {
 	virsh, err := exec.LookPath("virsh")
 	if err != nil {
@@ -148,11 +180,10 @@ func cleanConflictingVMs(clusterNames []string) {
 		return
 	}
 
-	targets := make(map[string]bool, len(clusterNames)+1)
+	targets := make(map[string]bool, len(clusterNames))
 	for _, n := range clusterNames {
 		targets[n] = true
 	}
-	targets["jumpbox"] = true // known KTHW artifact
 
 	for _, line := range strings.Split(out, "\n") {
 		name := strings.TrimSpace(line)
@@ -165,10 +196,7 @@ func cleanConflictingVMs(clusterNames []string) {
 	}
 }
 
-// DiscoverIPs populates the IP field for each machine by querying inside each VM.
-// Lima may assign different subnets (e.g. 192.168.105.x socket_vmnet, 192.168.106.x VZ).
-// We pick the first private IPv4, preferring subnets Lima uses for the shared VM network
-// so all VMs end up on the same logical network and can reach each other.
+// DiscoverIPs populates the IP field for each machine.
 func (c *Cluster) DiscoverIPs() error {
 	for i := range c.Machines {
 		out, err := c.Exec(c.Machines[i].Name, "hostname", "-I")
@@ -181,16 +209,13 @@ func (c *Cluster) DiscoverIPs() error {
 		}
 		c.Machines[i].IP = ip
 	}
-	c.Server = c.Machines[0]
-	c.Nodes = c.Machines[1:]
+	c.Jumpbox = c.Machines[0]
+	c.Server = c.Machines[1]
+	c.Nodes = c.Machines[2:]
 	return nil
 }
 
-// pickVMIP chooses one private IPv4 from the list. Prefers subnets Lima typically
-// uses for the shared VM network (192.168.106.x, 192.168.105.x), then any 192.168.x,
-// then other RFC1918 ranges, so VMs on the same host get consistent reachable IPs.
 func pickVMIP(addrs []string) string {
-	// Prefer Lima shared-style subnets so all VMs land on the same network
 	for _, prefix := range []string{"192.168.106.", "192.168.105.", "192.168."} {
 		for _, a := range addrs {
 			a = strings.TrimSpace(a)
@@ -209,20 +234,11 @@ func pickVMIP(addrs []string) string {
 }
 
 func isPrivateIPv4(s string) bool {
-	if strings.Contains(s, ":") {
-		return false
-	}
-	return strings.HasPrefix(s, "10.") ||
-		strings.HasPrefix(s, "172.16.") || strings.HasPrefix(s, "172.17.") ||
-		strings.HasPrefix(s, "172.18.") || strings.HasPrefix(s, "172.19.") ||
-		strings.HasPrefix(s, "172.20.") || strings.HasPrefix(s, "172.21.") ||
-		strings.HasPrefix(s, "172.22.") || strings.HasPrefix(s, "172.23.") ||
-		strings.HasPrefix(s, "172.24.") || strings.HasPrefix(s, "172.25.") ||
-		strings.HasPrefix(s, "172.26.") || strings.HasPrefix(s, "172.27.") ||
-		strings.HasPrefix(s, "172.28.") || strings.HasPrefix(s, "172.29.") ||
-		strings.HasPrefix(s, "172.30.") || strings.HasPrefix(s, "172.31.") ||
-		strings.HasPrefix(s, "192.168.")
+	ip := net.ParseIP(s)
+	return ip != nil && ip.To4() != nil && ip.IsPrivate()
 }
+
+// --- Networking: /etc/hosts + SSH ---
 
 // SetupHostEntries configures /etc/hosts on each VM so they can resolve each other.
 func (c *Cluster) SetupHostEntries() error {
@@ -239,6 +255,42 @@ func (c *Cluster) SetupHostEntries() error {
 	return nil
 }
 
+// SetupSSHKeys generates an SSH keypair on the jumpbox and distributes the
+// public key to all other machines so the jumpbox can SSH into them as root.
+func (c *Cluster) SetupSSHKeys() error {
+	// Generate keypair on jumpbox
+	if _, err := c.Exec(c.Jumpbox.Name, "bash", "-c",
+		`ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N "" -q`); err != nil {
+		return fmt.Errorf("ssh-keygen on jumpbox: %w", err)
+	}
+
+	pubKey, err := c.Exec(c.Jumpbox.Name, "cat", "/root/.ssh/id_ed25519.pub")
+	if err != nil {
+		return fmt.Errorf("read jumpbox pubkey: %w", err)
+	}
+	pubKey = strings.TrimSpace(pubKey)
+
+	// Distribute to server and worker nodes
+	targets := append([]Machine{c.Server}, c.Nodes...)
+	for _, m := range targets {
+		cmd := fmt.Sprintf(
+			`mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '%s' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys`,
+			pubKey)
+		if _, err := c.Exec(m.Name, "bash", "-c", cmd); err != nil {
+			return fmt.Errorf("distribute SSH key to %s: %w", m.Name, err)
+		}
+	}
+
+	// Verify connectivity: jumpbox → each target
+	for _, m := range targets {
+		if _, err := c.SSH(m.Name, "hostname"); err != nil {
+			return fmt.Errorf("jumpbox cannot SSH to %s: %w", m.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // VerifyVMs returns a status string for each VM.
 func (c *Cluster) VerifyVMs() (string, error) {
 	var lines []string
@@ -252,7 +304,141 @@ func (c *Cluster) VerifyVMs() (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// --- Command execution ---
+// --- Jumpbox setup ---
+
+// SetupJumpbox installs CLI tools on the jumpbox and creates the working directory.
+func (c *Cluster) SetupJumpbox() error {
+	jb := c.Jumpbox.Name
+
+	if _, err := c.Exec(jb, "bash", "-c",
+		"apt-get update -qq && apt-get -y -qq install wget curl vim openssl git"); err != nil {
+		return fmt.Errorf("install tools on jumpbox: %w", err)
+	}
+
+	if _, err := c.Exec(jb, "mkdir", "-p", c.JumpboxDir); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// StageOnJumpbox copies a local file from the host work directory to the
+// jumpbox working directory, preserving the filename.
+func (c *Cluster) StageOnJumpbox(localPath string) error {
+	remotePath := c.JumpboxDir + "/" + filepath.Base(localPath)
+	return c.CopyToVM(c.Jumpbox.Name, localPath, remotePath)
+}
+
+// InstallKubectlOnJumpbox copies kubectl from the downloads directory to /usr/local/bin/.
+func (c *Cluster) InstallKubectlOnJumpbox() error {
+	kubectlSrc := c.JumpboxDir + "/downloads/client/kubectl"
+	_, err := c.Exec(c.Jumpbox.Name, "bash", "-c",
+		fmt.Sprintf("cp %s /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl", kubectlSrc))
+	return err
+}
+
+// VerifyJumpbox confirms tools are installed and binaries are present.
+func (c *Cluster) VerifyJumpbox() (string, error) {
+	version, err := c.Exec(c.Jumpbox.Name, "kubectl", "version", "--client", "--short")
+	if err != nil {
+		// --short may not be supported; try without
+		version, err = c.Exec(c.Jumpbox.Name, "kubectl", "version", "--client")
+		if err != nil {
+			return "", fmt.Errorf("kubectl not working on jumpbox: %w", err)
+		}
+	}
+
+	var lines []string
+	lines = append(lines, "kubectl: "+strings.TrimSpace(version))
+
+	lsOut, _ := c.Exec(c.Jumpbox.Name, "ls", c.JumpboxDir+"/downloads/")
+	lines = append(lines, "downloads: "+strings.TrimSpace(strings.ReplaceAll(lsOut, "\n", ", ")))
+
+	return strings.Join(lines, "\n"), nil
+}
+
+// --- Jumpbox-mediated execution ---
+
+// SSH runs a command on a target VM from the jumpbox via SSH.
+// This is how all provisioning commands flow after the jumpbox is set up.
+func (c *Cluster) SSH(target string, args ...string) (string, error) {
+	sshArgs := fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@%s -- %s",
+		target, shellQuoteArgs(args))
+	var out string
+	err := retry(3, 2*time.Second, func() error {
+		var e error
+		out, e = c.Exec(c.Jumpbox.Name, "bash", "-c", sshArgs)
+		return e
+	})
+	return out, err
+}
+
+// SCPToVM copies files from the jumpbox to a target VM via SCP.
+func (c *Cluster) SCPToVM(target string, jumpboxPaths []string, remoteDest string) error {
+	srcs := strings.Join(jumpboxPaths, " ")
+	cmd := fmt.Sprintf("scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s root@%s:%s",
+		srcs, target, remoteDest)
+	return retry(3, 2*time.Second, func() error {
+		out, err := c.Exec(c.Jumpbox.Name, "bash", "-c", cmd)
+		if err != nil {
+			return fmt.Errorf("scp to %s: %w (output: %s)", target, err, strings.TrimSpace(out))
+		}
+		return nil
+	})
+}
+
+// shellQuoteArgs joins arguments for shell execution, quoting args that contain spaces.
+func shellQuoteArgs(args []string) string {
+	var parts []string
+	for _, a := range args {
+		if strings.ContainsAny(a, " \t'\"\\|&;$(){}") {
+			parts = append(parts, fmt.Sprintf("'%s'", strings.ReplaceAll(a, "'", "'\\''")))
+		} else {
+			parts = append(parts, a)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// --- kubectl remote access ---
+
+// ConfigureKubectl sets up kubectl on the jumpbox for remote cluster access,
+// mirroring KTHW step 10. The admin kubeconfig is already on the jumpbox
+// from step 5; this writes ~/.kube/config so kubectl works without flags.
+func (c *Cluster) ConfigureKubectl() error {
+	jb := c.Jumpbox.Name
+	kcPath := c.JumpboxDir + "/admin.kubeconfig"
+
+	if _, err := c.Exec(jb, "mkdir", "-p", "/root/.kube"); err != nil {
+		return err
+	}
+	if _, err := c.Exec(jb, "cp", kcPath, "/root/.kube/config"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// VerifyKubectl confirms kubectl works from the jumpbox without --kubeconfig.
+func (c *Cluster) VerifyKubectl() (string, error) {
+	jb := c.Jumpbox.Name
+	var lines []string
+
+	version, err := c.Exec(jb, "kubectl", "version")
+	if err != nil {
+		return "", fmt.Errorf("kubectl version: %w", err)
+	}
+	lines = append(lines, strings.TrimSpace(version))
+
+	nodes, err := c.Exec(jb, "kubectl", "get", "nodes")
+	if err != nil {
+		return "", fmt.Errorf("kubectl get nodes: %w", err)
+	}
+	lines = append(lines, strings.TrimSpace(nodes))
+
+	return strings.Join(lines, "\n"), nil
+}
+
+// --- Direct host-to-VM execution (used for initial setup) ---
 
 // Exec runs a command inside a Lima VM as root and returns combined output.
 func (c *Cluster) Exec(vm string, args ...string) (string, error) {
@@ -262,7 +448,6 @@ func (c *Cluster) Exec(vm string, args ...string) (string, error) {
 }
 
 // CopyToVM copies a local file into a VM at the specified destination.
-// limactl copy runs as the unprivileged user, so we stage in /tmp then sudo mv.
 func (c *Cluster) CopyToVM(vm, localPath, remotePath string) error {
 	tmpDest := "/tmp/ktew-" + filepath.Base(localPath)
 	if err := run("limactl", "copy", localPath, vm+":"+tmpDest); err != nil {
@@ -272,17 +457,17 @@ func (c *Cluster) CopyToVM(vm, localPath, remotePath string) error {
 	return err
 }
 
-// WaitForService polls a systemd service on a VM until it's active or timeout.
+// WaitForService polls a systemd service on a VM (via jumpbox SSH) until active.
 func (c *Cluster) WaitForService(vm, service string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := c.Exec(vm, "systemctl", "is-active", service)
+		out, err := c.SSH(vm, "systemctl", "is-active", service)
 		if err == nil && strings.TrimSpace(out) == "active" {
 			return nil
 		}
 		time.Sleep(2 * time.Second)
 	}
-	logs, _ := c.Exec(vm, "journalctl", "-u", service, "--no-pager", "-n", "20")
+	logs, _ := c.SSH(vm, "journalctl", "-u", service, "--no-pager", "-n", "20")
 	return fmt.Errorf("service %s on %s not active after %s\n%s", service, vm, timeout, logs)
 }
 

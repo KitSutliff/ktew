@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,10 +19,6 @@ type Step struct {
 }
 
 func main() {
-	// ktew must run against the standard Lima installation.
-	// Users with Colima often have LIMA_HOME set to ~/.colima/_lima, which causes
-	// limactl to look for a Colima-managed networks.yaml that ktew cannot manage.
-	// We force the standard environment to ensure hermetic operation.
 	os.Unsetenv("LIMA_HOME")
 	os.Unsetenv("LIMA_INSTANCE")
 
@@ -59,7 +56,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `kthw — Kubernetes The Hard Way, automated
 
 Usage:
-  kthw up    [--work-dir=DIR]   Create cluster
+  kthw up    [--work-dir=DIR]   Create cluster (4 VMs: jumpbox, server, node-0, node-1)
   kthw down  [--work-dir=DIR]   Destroy cluster
 
 Dependencies (Lima, QEMU) are installed automatically if missing.
@@ -68,19 +65,22 @@ Supported: macOS or Linux, arm64 or amd64.
 }
 
 func runUp(workDir string) {
-	if err := preflight(); err != nil {
-		fmt.Fprintf(os.Stderr, "preflight failed: %v\n", err)
+	absDir, err := filepath.Abs(workDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve work dir: %v\n", err)
 		os.Exit(1)
 	}
-
-	absDir, _ := filepath.Abs(workDir)
-	os.MkdirAll(absDir, 0755)
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "create work dir: %v\n", err)
+		os.Exit(1)
+	}
 	cluster := NewCluster(absDir)
 	reportPath := filepath.Join(absDir, "kthw-report.md")
 	finalReportPath := "kthw-report.md"
 
 	steps := defineSteps(cluster)
-	report, err := NewReport(len(steps), reportPath)
+	totalSteps := len(steps) + 1 // +1 for cleanup
+	report, err := NewReport(totalSteps, reportPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create report: %v\n", err)
 		os.Exit(1)
@@ -98,7 +98,6 @@ func runUp(workDir string) {
 
 		if doErr != nil {
 			report.Record(idx, step.Name, dur, "", doErr)
-			report.Finalize()
 			fmt.Fprintf(os.Stderr, "\n  ✗ Step %d failed: %v\n", idx, doErr)
 			failed = true
 			break
@@ -108,7 +107,6 @@ func runUp(workDir string) {
 		dur = time.Since(start)
 		if verifyErr != nil {
 			report.Record(idx, step.Name, dur, evidence, verifyErr)
-			report.Finalize()
 			fmt.Fprintf(os.Stderr, "\n  ✗ Step %d verification failed: %v\n", idx, verifyErr)
 			failed = true
 			break
@@ -117,24 +115,22 @@ func runUp(workDir string) {
 		report.Record(idx, step.Name, dur, evidence, nil)
 	}
 
-	if !failed {
-		report.Finalize()
-	}
+	// Step 13: Cleaning Up — always runs, even on failure
+	cleanupIdx := totalSteps
+	fmt.Printf("  # Step %d: Cleaning Up\n", cleanupIdx)
+	cleanupStart := time.Now()
+	cluster.DestroyVMs()
+	cleanupDur := time.Since(cleanupStart)
+	report.Record(cleanupIdx, "Cleaning Up", cleanupDur, "VMs destroyed, work directory removed", nil)
+	report.Finalize()
 
-	// Copy report out of work dir before cleanup
+	// Copy finalized report out, then destroy work dir and self
 	if data, err := os.ReadFile(reportPath); err == nil {
 		os.WriteFile(finalReportPath, data, 0644)
 	}
-
-	fmt.Println()
-	fmt.Println("  ────────────────────────────────────────")
-	fmt.Println("  Cleaning up VMs...")
-	cluster.DestroyVMs()
 	os.RemoveAll(absDir)
 	self, _ := os.Executable()
 	os.Remove(self)
-	fmt.Println("  done.")
-	fmt.Println()
 
 	elapsed := time.Since(runStart)
 
@@ -178,26 +174,67 @@ func preflight() error {
 	return ensureDeps()
 }
 
+// defineSteps returns steps 1–12, matching the original KTHW chapters exactly.
+// Step 13 (Cleaning Up) is handled unconditionally after the loop in runUp().
 func defineSteps(c *Cluster) []Step {
 	var pki *PKI
 	var certEvidence string
 
 	return []Step{
+		// 01 — Prerequisites
 		{
-			Name: "Create VMs",
+			Name: "Prerequisites",
 			Do: func() error {
+				if err := preflight(); err != nil {
+					return err
+				}
+				// Create all 4 VMs — the machines themselves are the prerequisite
 				if err := c.CreateVMs(); err != nil {
 					return err
 				}
-				if err := c.DiscoverIPs(); err != nil {
+				return c.DiscoverIPs()
+			},
+			Verify: func() (string, error) {
+				var lines []string
+				lines = append(lines, fmt.Sprintf("OS: %s, Arch: %s", runtime.GOOS, runtime.GOARCH))
+				if path, err := exec.LookPath("limactl"); err == nil {
+					lines = append(lines, "limactl: "+path)
+				}
+				lines = append(lines, fmt.Sprintf("VMs: %d (jumpbox, server, node-0, node-1)", len(c.Machines)))
+				for _, m := range c.Machines {
+					lines = append(lines, fmt.Sprintf("  %-8s %s", m.Name, m.IP))
+				}
+				return strings.Join(lines, "\n"), nil
+			},
+		},
+		// 02 — Set Up The Jumpbox
+		{
+			Name: "Set Up The Jumpbox",
+			Do: func() error {
+				if err := c.SetupJumpbox(); err != nil {
 					return err
 				}
-				return c.SetupHostEntries()
+				if err := DownloadOnJumpbox(c); err != nil {
+					return err
+				}
+				return c.InstallKubectlOnJumpbox()
+			},
+			Verify: func() (string, error) { return c.VerifyJumpbox() },
+		},
+		// 03 — Provisioning Compute Resources
+		{
+			Name: "Provisioning Compute Resources",
+			Do: func() error {
+				if err := c.SetupHostEntries(); err != nil {
+					return err
+				}
+				return c.SetupSSHKeys()
 			},
 			Verify: func() (string, error) { return c.VerifyVMs() },
 		},
+		// 04 — Provisioning a CA and Generating TLS Certificates
 		{
-			Name: "Generate Certificates",
+			Name: "Provisioning a CA and Generating TLS Certificates",
 			Do: func() error {
 				nodeIPs := make(map[string]string, len(c.Nodes))
 				for _, n := range c.Nodes {
@@ -205,7 +242,28 @@ func defineSteps(c *Cluster) []Step {
 				}
 				var err error
 				pki, certEvidence, err = GenerateAll(c.WorkDir, c.Server.IP, nodeIPs)
-				return err
+				if err != nil {
+					return err
+				}
+				// Stage all certs on jumpbox
+				certFiles := []string{
+					"ca.crt", "ca.key",
+					"kube-api-server.crt", "kube-api-server.key",
+					"service-accounts.crt", "service-accounts.key",
+					"admin.crt", "admin.key",
+					"node-0.crt", "node-0.key",
+					"node-1.crt", "node-1.key",
+					"kube-proxy.crt", "kube-proxy.key",
+					"kube-scheduler.crt", "kube-scheduler.key",
+					"kube-controller-manager.crt", "kube-controller-manager.key",
+				}
+				for _, f := range certFiles {
+					if err := c.StageOnJumpbox(filepath.Join(c.WorkDir, f)); err != nil {
+						return fmt.Errorf("stage %s on jumpbox: %w", f, err)
+					}
+				}
+				// Distribute certs from jumpbox to server and workers
+				return c.DistributeCerts()
 			},
 			Verify: func() (string, error) {
 				if pki == nil {
@@ -214,14 +272,25 @@ func defineSteps(c *Cluster) []Step {
 				return certEvidence, nil
 			},
 		},
+		// 05 — Generating Kubernetes Configuration Files for Authentication
 		{
-			Name: "Generate Kubeconfigs",
+			Name: "Generating Kubernetes Configuration Files for Authentication",
 			Do: func() error {
 				configs, err := AllKubeconfigs(pki, "https://server.kubernetes.local:6443")
 				if err != nil {
 					return err
 				}
-				return WriteKubeconfigs(c.WorkDir, configs)
+				if err := WriteKubeconfigs(c.WorkDir, configs); err != nil {
+					return err
+				}
+				// Stage all kubeconfigs on jumpbox
+				for name := range configs {
+					if err := c.StageOnJumpbox(filepath.Join(c.WorkDir, name+".kubeconfig")); err != nil {
+						return fmt.Errorf("stage %s.kubeconfig: %w", name, err)
+					}
+				}
+				// Distribute from jumpbox to server and workers
+				return c.DistributeKubeconfigs()
 			},
 			Verify: func() (string, error) {
 				names := []string{"node-0", "node-1", "kube-proxy", "kube-controller-manager", "kube-scheduler", "admin"}
@@ -237,11 +306,18 @@ func defineSteps(c *Cluster) []Step {
 				return fmt.Sprintf("%d kubeconfigs generated:\n%s", len(names), strings.Join(lines, "\n")), nil
 			},
 		},
+		// 06 — Generating the Data Encryption Config and Key
 		{
-			Name: "Generate Encryption Config",
+			Name: "Generating the Data Encryption Config and Key",
 			Do: func() error {
 				_, err := GenEncryptionConfig(c.WorkDir)
-				return err
+				if err != nil {
+					return err
+				}
+				if err := c.StageOnJumpbox(filepath.Join(c.WorkDir, "encryption-config.yaml")); err != nil {
+					return err
+				}
+				return c.DistributeEncryptionConfig()
 			},
 			Verify: func() (string, error) {
 				path := filepath.Join(c.WorkDir, "encryption-config.yaml")
@@ -252,54 +328,41 @@ func defineSteps(c *Cluster) []Step {
 				return fmt.Sprintf("encryption-config.yaml (%d bytes)", info.Size()), nil
 			},
 		},
+		// 07 — Bootstrapping the etcd Cluster
 		{
-			Name: "Download Binaries",
-			Do: func() error {
-				_, err := DownloadAll(c.WorkDir)
-				return err
-			},
-			Verify: func() (string, error) {
-				var lines []string
-				groups := []string{"controller", "worker", "client", "etcd", "containerd", "cni"}
-				for _, g := range groups {
-					dir := filepath.Join(c.WorkDir, "downloads", g)
-					entries, err := os.ReadDir(dir)
-					if err != nil {
-						continue
-					}
-					var names []string
-					for _, e := range entries {
-						names = append(names, e.Name())
-					}
-					lines = append(lines, fmt.Sprintf("  %s: %s", g, strings.Join(names, ", ")))
-				}
-				return "Downloaded binaries:\n" + strings.Join(lines, "\n"), nil
-			},
-		},
-		{
-			Name:   "Bootstrap etcd",
+			Name:   "Bootstrapping the etcd Cluster",
 			Do:     func() error { return c.BootstrapEtcd() },
 			Verify: func() (string, error) { return c.VerifyEtcd() },
 		},
+		// 08 — Bootstrapping the Kubernetes Control Plane
 		{
-			Name:   "Bootstrap Control Plane",
+			Name:   "Bootstrapping the Kubernetes Control Plane",
 			Do:     func() error { return c.BootstrapControlPlane() },
 			Verify: func() (string, error) { return c.VerifyControlPlane() },
 		},
+		// 09 — Bootstrapping the Kubernetes Worker Nodes
 		{
-			Name:   "Bootstrap Workers",
+			Name:   "Bootstrapping the Kubernetes Worker Nodes",
 			Do:     func() error { return c.BootstrapAllWorkers() },
 			Verify: func() (string, error) { return c.VerifyWorkers() },
 		},
+		// 10 — Configuring kubectl for Remote Access
 		{
-			Name:   "Configure Pod Network Routes",
+			Name:   "Configuring kubectl for Remote Access",
+			Do:     func() error { return c.ConfigureKubectl() },
+			Verify: func() (string, error) { return c.VerifyKubectl() },
+		},
+		// 11 — Provisioning Pod Network Routes
+		{
+			Name:   "Provisioning Pod Network Routes",
 			Do:     func() error { return c.SetupPodRoutes() },
 			Verify: func() (string, error) { return c.VerifyRoutes() },
 		},
+		// 12 — Smoke Test
 		{
 			Name:   "Smoke Test",
-			Do:     func() error { return nil },
-			Verify: func() (string, error) { return c.SmokeTest() },
+			Do:     func() error { return c.RunSmokeTest() },
+			Verify: func() (string, error) { return c.VerifySmokeTest() },
 		},
 	}
 }

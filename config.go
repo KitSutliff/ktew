@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"text/template"
 )
@@ -85,14 +84,9 @@ func AllKubeconfigs(pki *PKI, serverURL string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read key %s: %w", d.certName, err)
 		}
-		svr := serverURL
-		if d.name == "admin" && runtime.GOOS == "linux" {
-			// On Linux we port-forward 6443 to host; use localhost so host kubectl works.
-			svr = "https://127.0.0.1:6443"
-		}
 		kc, err := GenKubeconfig(KubeconfigSpec{
 			ClusterName: "kubernetes-the-hard-way",
-			Server:      svr,
+			Server:      serverURL,
 			User:        d.user,
 			CACertPEM:   pki.CACertPEM,
 			ClientCert:  cert,

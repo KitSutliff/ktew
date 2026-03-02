@@ -2,7 +2,7 @@
 
 Automates the entire [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way) tutorial with a single command on **standard macOS or Linux** (Apple Silicon, Intel Mac, or any x86_64/ARM64 Linux).
 
-Produces a Kubernetes cluster (1 control plane + 2 workers) running in Lima VMs, plus a TAP-formatted proof report documenting every step's completion.
+Provisions 4 Lima VMs (jumpbox, server, node-0, node-1), deploys a full Kubernetes cluster, and produces a TAP-formatted proof report documenting every step's completion.
 
 ## Prerequisites
 
@@ -18,24 +18,25 @@ go build -o kthw . && ./kthw up
 
 That's it. Missing dependencies are installed automatically. VMs are cleaned up after the run.
 
-On Linux, `admin.kubeconfig` uses `127.0.0.1:6443` (port-forwarded from the server VM).
-
 To tear down manually: `./kthw down`
 
 ## What it does
 
 | Step | What | Verification |
 |------|------|-------------|
-| 1 | Create 3 ARM64 Linux VMs via Lima | Hostname + IP reachable |
-| 2 | Generate CA + 8 TLS certificates | Certificate subjects listed |
-| 3 | Generate 6 kubeconfigs | File sizes verified |
-| 4 | Generate encryption config | AES-CBC key present |
-| 5 | Download k8s, etcd, containerd, CNI binaries | All binaries present |
-| 6 | Bootstrap etcd | `etcdctl member list` |
-| 7 | Bootstrap control plane | `kubectl cluster-info` |
-| 8 | Bootstrap workers | `kubectl get nodes` shows Ready |
-| 9 | Configure pod network routes | `ip route` shows pod CIDRs |
-| 10 | Smoke test | Secret encryption, nginx deployment, NodePort, exec |
+| 1 | Prerequisites — create 4 Lima VMs | Hostname + IP reachable |
+| 2 | Set up the jumpbox — install tools, download binaries | kubectl version, downloads listed |
+| 3 | Provision compute resources — /etc/hosts, SSH keys | Jumpbox can SSH to all nodes |
+| 4 | Provision CA and TLS certificates | Certificate subjects listed |
+| 5 | Generate kubeconfigs for authentication | File sizes verified |
+| 6 | Generate data encryption config and key | AES-CBC key present |
+| 7 | Bootstrap etcd | `etcdctl member list` |
+| 8 | Bootstrap control plane | `kubectl cluster-info` |
+| 9 | Bootstrap worker nodes | `kubectl get nodes` shows Ready |
+| 10 | Configure kubectl for remote access | `kubectl version` from jumpbox |
+| 11 | Provision pod network routes | `ip route` shows pod CIDRs |
+| 12 | Smoke test | Secret encryption, nginx deployment, NodePort, exec |
+| 13 | Cleaning up | VMs destroyed |
 
 ## Output
 
@@ -43,11 +44,11 @@ To tear down manually: `./kthw down`
 
 **Report:** `kthw-work/kthw-report.md` — Markdown document with timestamped evidence for each step.
 
-**Kubeconfig:** `kthw-work/admin.kubeconfig` — ready to use with `kubectl`.
+**Kubeconfig:** kubectl is configured on the jumpbox VM during the run. The cluster is ephemeral — cleaned up after the smoke test.
 
 ## Design constraints
 
-- **Go standard library only.** Zero external Go dependencies. All crypto, HTTP, templating, and tar extraction use stdlib packages.
+- **Go standard library only.** Zero external Go dependencies. All crypto, HTTP, and templating use stdlib packages.
 - **Single binary.** `go build` produces one executable.
 - **DRY.** One function generates all certs. One function generates all kubeconfigs. One abstraction for VM commands. One pattern for systemd services.
 - **Proof-driven.** Every step has a mandatory verification function. You cannot add a step without also proving it worked.

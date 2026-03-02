@@ -169,9 +169,21 @@ func AllCertSpecs(serverIP string, nodeIPs map[string]string) map[string]CertSpe
 		"admin":  {CN: "admin", O: "system:masters"},
 		"node-0": nodeSpec("node-0"),
 		"node-1": nodeSpec("node-1"),
-		"kube-proxy":              {CN: "system:kube-proxy", O: "system:node-proxier", ExtUsage: both},
-		"kube-scheduler":          {CN: "system:kube-scheduler", O: "system:system:kube-scheduler", ExtUsage: both},
-		"kube-controller-manager": {CN: "system:kube-controller-manager", O: "system:kube-controller-manager", ExtUsage: both},
+		"kube-proxy": {
+			CN: "system:kube-proxy", O: "system:node-proxier",
+			DNSNames: []string{"kube-proxy"}, IPs: []net.IP{net.ParseIP("127.0.0.1")},
+			ExtUsage: both,
+		},
+		"kube-scheduler": {
+			CN: "system:kube-scheduler", O: "system:kube-scheduler",
+			DNSNames: []string{"kube-scheduler"}, IPs: []net.IP{net.ParseIP("127.0.0.1")},
+			ExtUsage: both,
+		},
+		"kube-controller-manager": {
+			CN: "system:kube-controller-manager", O: "system:kube-controller-manager",
+			DNSNames: []string{"kube-controller-manager"}, IPs: []net.IP{net.ParseIP("127.0.0.1")},
+			ExtUsage: both,
+		},
 		"kube-api-server": {
 			CN: "kubernetes",
 			DNSNames: []string{
